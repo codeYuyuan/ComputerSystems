@@ -1,7 +1,7 @@
 /* 
  * tsh - A tiny shell program with job control
  * 
- * <Put your name and login ID here>
+    ID: Yuyuan Liu
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -165,6 +165,33 @@ int main(int argc, char **argv)
 */
 void eval(char *cmdline) 
 {
+    char *argv[MAXARGS];
+    char buf[MAXLINE];
+    int bg;
+    pid_t pid;
+
+    strcpy(buf,cmdline);
+    bg = parseline(buf,argv);
+    if(argv[0] == NULL){
+        return;            //ignore empty lines
+    }
+    
+    if(!builtin_cmd(argv)){
+        if((pid = fork())==0){
+            if(execve(argv[0], argv, environ)<0){
+                printf("%s: Command not found.\n", argv[0]);
+                exit(0);
+            }
+        }
+        if(!bg){
+            int status;
+            if(waitpid(pid, &status, 0)<0){
+                unix_error("waitfg: waitpid error");
+            }
+        }else{
+            printf("%d %s\n",pid,cmdline);
+        }
+    }
     return;
 }
 
@@ -231,6 +258,19 @@ int parseline(const char *cmdline, char **argv)
  */
 int builtin_cmd(char **argv) 
 {
+    char* command = argv[0];
+    if(!strcmp(command, "quit")){
+        exit(0);
+    }else if(!strcmp(command,"fg")||!strcmp(command, "bg")){
+        do_bgfg(argv);
+        return 1;
+    }else if(!strcmp(command, "jobs")){
+        listjobs(jobs);
+        return 1;
+    }else if(!strcmp(command,"echo")){
+        printf("%s\n",argv[1]);
+        return 1;
+    }
     return 0;     /* not a builtin command */
 }
 
