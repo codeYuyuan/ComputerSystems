@@ -169,27 +169,37 @@ void eval(char *cmdline)
     char buf[MAXLINE];
     int bg;
     pid_t pid;
-
-    strcpy(buf,cmdline);
+    sigset_t mask;
+    strcpy(buf,cmdline); 
     bg = parseline(buf,argv);
     if(argv[0] == NULL){
         return;            //ignore empty lines
     }
     
     if(!builtin_cmd(argv)){
+        sigemptyset(&mask);
+        sigaddset(&mask, SIGCHLD);
+        sigprocmask(SIG_BLOCK, &mask, NULL);
         if((pid = fork())==0){
+    	    sigprocmask(SIG_UNBLOCK,&mask,NULL);
+            if(setpgid(0,0)<0){
+                unix_error("Set process gid error");
+            }
             if(execve(argv[0], argv, environ)<0){
                 printf("%s: Command not found.\n", argv[0]);
                 exit(0);
             }
-        }
-        if(!bg){
-            int status;
-            if(waitpid(pid, &status, 0)<0){
-                unix_error("waitfg: waitpid error");
-            }
         }else{
-            printf("%d %s\n",pid,cmdline);
+            if(!bg){
+                addjob(jobs, pid, FG, cmdline);
+		sigprocmask(SIG_UNBLOCK,&mask,NULL);
+                waitfg(pid);
+            }else{
+                addjob(jobs, pid, BG, cmdline);
+		sigprocmask(SIG_UNBLOCK,&mask,NULL);
+                printf("[%d] (%d) %s",pid2jid(pid),pid,cmdline);
+            }
+
         }
     }
     return;
@@ -279,6 +289,50 @@ int builtin_cmd(char **argv)
  */
 void do_bgfg(char **argv) 
 {
+    struct job_t *job;
+    char *id = argv[1];
+    int jid;
+    pid_t pid;
+    
+    if(id == NULL){
+        printf("No ID provided\n");
+        return;
+    }
+    //jid
+    if(id[0] == '%'){
+        jid = atoi(&id[1]);
+        if(!(job = getjobjid(jobs, jid))){
+            printf("No such job\n");
+            return;
+        }
+    }else if(isdigit(id[1])){        // pid
+        pid = atoi(id);
+        if(!(job = getjobpid(jobs, pid))){
+            printf("No such job\n");
+            return;
+        }
+    }else{
+        printf("No such job\n");
+        return;
+    }
+    
+    //send sigcount to gid
+    
+    if(kill(-(job->pid), SIGCONT)<0){
+        if(errno != ESRCH){
+            unix_error("Kill SIGCONT ERROR");
+        }
+    }
+    
+    if(!strcmp("bg", argv[0])){
+        job->state = BG;
+        printf("[%d] (%d) %s", job->jid, job->pid, job->cmdline);
+    }else if(!strcmp("fg", argv[0])){
+        job->state = FG;
+        waitfg(job->pid);
+    }else{
+        printf("BG/FG ERROR\n");
+    }
     return;
 }
 
@@ -287,7 +341,11 @@ void do_bgfg(char **argv)
  */
 void waitfg(pid_t pid)
 {
+    while(pid == fgpid(jobs)){
+        sleep(0);
+    }
     return;
+   
 }
 
 /*****************
@@ -303,6 +361,22 @@ void waitfg(pid_t pid)
  */
 void sigchld_handler(int sig) 
 {
+    pid_t pid;
+    int status;
+    
+    while((pid = waitpid(-1, &status, WNOHANG|WUNTRACED))>0){
+        if(WIFSTOPPED(status)){
+            getjobpid(jobs, pid)->state = ST;
+            printf("Job [%d] (%d) Stopped by signal %d\n", pid2jid(pid),pid, WSTOPSIG(status));
+        }else if(WIFSIGNALED(status)){
+	    if(WTERMSIG(status)!= SIGINT)
+                printf("Job [%d] (%d) terminated by signal %d\n", pid2jid(pid), pid, WTERMSIG(status));
+            deletejob(jobs, pid);
+        }else if (WIFEXITED(status)){
+            deletejob(jobs, pid);
+        }
+    }
+    
     return;
 }
 
@@ -313,6 +387,16 @@ void sigchld_handler(int sig)
  */
 void sigint_handler(int sig) 
 {
+    pid_t pid = fgpid(jobs);
+    int jid = pid2jid(pid);
+    if(pid!=0){
+        if(kill(-pid, SIGINT)<0){
+            unix_error("SIGINT ERROR");
+            return;
+        }
+        printf("Job [%d] (%d) terminated by signal %d\n",jid,pid,sig);
+        deletejob(jobs, pid);
+    }
     return;
 }
 
@@ -323,6 +407,13 @@ void sigint_handler(int sig)
  */
 void sigtstp_handler(int sig) 
 {
+    pid_t pid = fgpid(jobs);
+    int jid = pid2jid(pid);
+    if (pid!=0) {
+        printf("Job [%d] (%d) stopped by signal %d\n",jid,pid,sig);
+        getjobpid(jobs, pid) ->state = ST;
+        kill(-pid,SIGSTOP);
+    }
     return;
 }
 
