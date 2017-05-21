@@ -367,12 +367,14 @@ void sigchld_handler(int sig)
     while((pid = waitpid(-1, &status, WNOHANG|WUNTRACED))>0){
         if(WIFSTOPPED(status)){
             getjobpid(jobs, pid)->state = ST;
-            printf("Job [%d] (%d) Stopped by signal %d\n", pid2jid(pid),pid, WSTOPSIG(status));
-        }else if(WIFSIGNALED(status)){
-	    if(WTERMSIG(status)!= SIGINT)
-                printf("Job [%d] (%d) terminated by signal %d\n", pid2jid(pid), pid, WTERMSIG(status));
+       //     printf("Job [%d] (%d) Stopped by signal %d\n", pid2jid(pid),pid, WSTOPSIG(status));
+        }
+	if(WIFSIGNALED(status)){
+	    if(WTERMSIG(status)== SIGINT&&pid2jid(pid)!=0)
+                printf("TAG Job [%d] (%d) terminated by signal %d\n", pid2jid(pid), pid, WTERMSIG(status));
             deletejob(jobs, pid);
-        }else if (WIFEXITED(status)){
+        }
+	if (WIFEXITED(status)){
             deletejob(jobs, pid);
         }
     }
@@ -410,9 +412,11 @@ void sigtstp_handler(int sig)
     pid_t pid = fgpid(jobs);
     int jid = pid2jid(pid);
     if (pid!=0) {
+	if(kill(-pid,SIGTSTP)<0){
+	    unix_error("SIGTSTP ERROR");
+	}
         printf("Job [%d] (%d) stopped by signal %d\n",jid,pid,sig);
         getjobpid(jobs, pid) ->state = ST;
-        kill(-pid,SIGSTOP);
     }
     return;
 }
