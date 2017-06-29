@@ -20,12 +20,13 @@ void doit(int connfd);
 void parse_url(char *url, char *hostname, char *path, int *port);
 void build_http_header(char *http_header, char *hostname, char *path, int port, rio_t *client_rio);
 int connect_endServer(char *hostname, int port, char *http_header);
+void *thread(void *vargp);
 
 int main(int argc, char **argv){
     int listenfd, connfd;
     socklen_t clientlen;
     char hostname[MAXLINE], port[MAXLINE];
-
+    pthread_t tid;
     struct sockaddr_storage clientaddr;
     if(argc != 2){
         fprintf(stderr, "usage: %s <port>\n", argv[0]);
@@ -38,10 +39,16 @@ int main(int argc, char **argv){
         connfd = Accept(listenfd, (SA *)&clientaddr, &clientlen);
         Getnameinfo((SA*)&clientaddr, clientlen, hostname, MAXLINE, port,MAXLINE,0);
         printf("Accepted connection from (%s %s).\n",hostname, port);
-        doit(connfd);
-        Close(connfd);
+        Pthread_create(&tid,NULL,thread,(void *)connfd);
     }
     return 0;
+}
+
+void *thread(void *vargp){
+    Pthread_detach(pthread_self());
+    int connfd = (int)vargp;
+    doit(connfd);
+    Close(connfd);
 }
 
 /*handle http request from client*/
