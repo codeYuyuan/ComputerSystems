@@ -232,7 +232,7 @@ int cache_eviction(){
     }
     return index;
 }
-
+/*reader favor*/
 void cache_reader(int i){
     P(&cache.cacheobjs[i].mutex_readCnt);
     cache.cacheobjs[i].readCnt++;
